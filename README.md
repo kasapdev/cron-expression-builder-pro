@@ -10,12 +10,13 @@ Cron Expression Builder Pro is part of the **Web Utility Suite**. It runs entire
 
 ## Features
 
-- **Visual field builder** — minute, hour, day-of-month, month, and day-of-week, each with Every / Specific (comma list) / Range / Step modes. Month and day-of-week accept both numbers and 3-letter names (`JAN`, `MON`, …).
-- **Two-way raw expression sync** — edit the pickers and the raw `* * * * *` string updates live; paste or type a raw expression and it parses back into the pickers, including `*/n`, `a-b`, and comma lists.
+- **Visual field builder** — minute, hour, day-of-month, month, and day-of-week, each with Every / Specific / Range / Step / List (comma-separated) modes, kept in sync with each other and with the raw expression. Month and day-of-week names (January, Monday, …) are used when rendering the plain-English explanation.
+- **Two-way raw expression sync** — edit the pickers and the raw `* * * * *` string updates live; paste or type a raw expression and it parses back into the pickers, including `*/n`, `a-b`, `a-b/n`, and comma lists.
+- **10 built-in presets** — every minute, every 5/15 minutes, hourly, every 2 hours, daily at midnight, weekdays at 9am, weekly, monthly, and yearly.
 - **Plain-English explanation** — written from scratch in JavaScript (no library), correctly reflecting cron's day-of-month/day-of-week **OR** semantics when both are restricted.
-- **Next 5 run times** — a hand-written cron-to-next-run simulator (no library) walks forward from now, field by field, with a relative "in N days/hours/minutes" label next to each result and a safety cap (~4 simulated years) that reports "no matching run time found" for impossible schedules (e.g. day 30 of a fixed February).
-- **Inline validation** — each field flags out-of-range values, malformed ranges, and invalid steps without crashing the app.
-- **Copy** the raw expression, and **Reset** back to "every minute".
+- **Next 5 run times** — a hand-written cron-to-next-run simulator (no library) walks forward from now, field by field, with a relative "in N days/hours/minutes" label next to each result (refreshed every 30s) and a safety cap (~4 simulated years) that reports "no matching run time found" for impossible schedules (e.g. day 30 of a fixed February).
+- **Inline validation** — each field flags out-of-range values, malformed ranges, and invalid steps without crashing the app; a status badge and error panel surface the problem.
+- **Copy** the raw expression to the clipboard.
 - **Auto-persist** — your last expression is saved to `localStorage` and restored on return.
 - **Dark & light themes**, fully responsive down to 360px, accessible, and keyboard-driven.
 
@@ -36,7 +37,7 @@ Then simply open `index.html` in any modern browser (double-click it, or `file:/
 2. Watch the **Explanation** panel update live with a plain-English description of the schedule.
 3. Check the **Next 5 run times** panel to see exactly when the schedule will next fire, in your local time.
 4. Fix any field flagged with a red error before relying on the result.
-5. **Copy** the raw expression once you're happy with it, or **Reset** to start over.
+5. **Copy** the raw expression once you're happy with it, or pick one of the 10 presets to start from a common schedule.
 
 ## Keyboard Shortcuts
 

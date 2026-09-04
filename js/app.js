@@ -1,449 +1,271 @@
 /* =====================================================================
    Cron Expression Builder Pro — app.js
-   Visual cron builder with two-way raw-expression sync, a from-scratch
-   human-readable explainer, and a from-scratch next-run calculator.
-   Classic script (no modules). Depends on window.WUS (core.js).
+   Visual 5-field cron builder with bidirectional raw <-> picker sync,
+   a from-scratch human-readable explainer, and a from-scratch next-run
+   calculator. Classic script (no modules). Depends on window.WUS (core.js).
    ===================================================================== */
 (function () {
   'use strict';
 
   var WUS = window.WUS;
   var STORE_KEY = 'cronbuilder.state';
+  var DEFAULT_RAW = '0 9 * * 1-5';
+
+  var MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   /* =================================================================
-     FIELD DEFINITIONS
+     FIELD DEFINITIONS — order matches standard 5-field cron syntax
      ================================================================= */
-  var MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  var DOW_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-  var MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  var DOW_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
   var FIELD_DEFS = [
-    { key: 'minute', label: 'Minute', min: 0, max: 59, names: null, unit: 'minute(s)' },
-    { key: 'hour', label: 'Hour', min: 0, max: 23, names: null, unit: 'hour(s)' },
-    { key: 'dom', label: 'Day of month', min: 1, max: 31, names: null, unit: 'day(s)' },
-    { key: 'month', label: 'Month', min: 1, max: 12, names: MONTH_NAMES, unit: 'month(s)' },
-    { key: 'dow', label: 'Day of week', min: 0, max: 7, names: DOW_NAMES, unit: 'day(s) of week' }
+    { key: 'minute', min: 0, max: 59 },
+    { key: 'hour', min: 0, max: 23 },
+    { key: 'dom', min: 1, max: 31 },
+    { key: 'month', min: 1, max: 12, aliasSevenToZero: false },
+    { key: 'dow', min: 0, max: 7, aliasSevenToZero: true } // 7 accepted as alias for Sunday (0)
   ];
 
   function defByKey(key) {
-    for (var i = 0; i < FIELD_DEFS.length; i++) if (FIELD_DEFS[i].key === key) return FIELD_DEFS[i];
+    for (var i = 0; i < FIELD_DEFS.length; i++) { if (FIELD_DEFS[i].key === key) return FIELD_DEFS[i]; }
     return null;
   }
 
   /* =================================================================
-     STATE
-     One entry per field: { mode: 'every'|'specific'|'range'|'step',
-                             specific: [nums], range: [from, to], step: n,
-                             error: string|null }
+     CRON FIELD PARSER (from scratch)
+     Handles: star, star-slash-n, a, a-b, a-b-slash-n, a-slash-n, and comma
+     lists combining any of the above (e.g. "1-5,10,every-15th").
+     Returns a Set<number> of matching values, or throws Error.
      ================================================================= */
-  var state = {};
-  FIELD_DEFS.forEach(function (def) {
-    state[def.key] = { mode: 'every', specific: [], range: [def.min, def.min], step: 1, error: null };
-  });
-
-  var syncing = false; // guards raw <-> fields feedback loop
-
-  /* =================================================================
-     DOM refs
-     ================================================================= */
-  var fieldsGrid = document.getElementById('fieldsGrid');
-  var cardTemplate = document.getElementById('fieldCardTemplate');
-  var rawInput = document.getElementById('rawInput');
-  var rawError = document.getElementById('rawError');
-  var explainText = document.getElementById('explainText');
-  var runsList = document.getElementById('runsList');
-  var runsEmpty = document.getElementById('runsEmpty');
-  var statusBadge = document.getElementById('statusBadge');
-  var statusText = document.getElementById('statusText');
-
-  var cards = {}; // key -> { root, modeButtons, panels, specificInput, rangeFrom, rangeTo, stepInput, error }
-
-  /* =================================================================
-     BUILD FIELD CARDS FROM TEMPLATE
-     ================================================================= */
-  function buildCards() {
-    FIELD_DEFS.forEach(function (def) {
-      var node = cardTemplate.content.firstElementChild.cloneNode(true);
-      node.setAttribute('data-field', def.key);
-      node.querySelector('.field-card-title').textContent = def.label;
-      node.querySelector('.field-card-range').textContent = def.min + '–' + def.max + (def.key === 'dow' ? ' (0 or 7 = Sun)' : '');
-
-      var specificInput = node.querySelector('.field-specific-input');
-      specificInput.placeholder = def.names ? 'e.g. ' + def.min + ',' + (def.min + 1) + ' or ' + def.names[0] : 'e.g. ' + def.min + ',' + (def.min + 1) + ',' + (def.min + 2);
-
-      var rangeFrom = node.querySelector('.field-range-from');
-      var rangeTo = node.querySelector('.field-range-to');
-      rangeFrom.min = rangeTo.min = def.min;
-      rangeFrom.max = rangeTo.max = def.max;
-      rangeFrom.value = def.min;
-      rangeTo.value = def.min;
-
-      var stepInput = node.querySelector('.field-step-input');
-      stepInput.min = 1;
-      stepInput.max = def.max - def.min + 1;
-      node.querySelector('.field-step-unit').textContent = def.unit;
-
-      var errorEl = node.querySelector('.field-error');
-      var modeButtons = Array.prototype.slice.call(node.querySelectorAll('.field-mode button'));
-      var panels = {};
-      Array.prototype.slice.call(node.querySelectorAll('.mode-panel')).forEach(function (p) {
-        panels[p.getAttribute('data-mode-panel')] = p;
-      });
-
-      fieldsGrid.appendChild(node);
-      cards[def.key] = {
-        root: node, modeButtons: modeButtons, panels: panels,
-        specificInput: specificInput, rangeFrom: rangeFrom, rangeTo: rangeTo,
-        stepInput: stepInput, error: errorEl
-      };
-
-      modeButtons.forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          setFieldMode(def.key, btn.getAttribute('data-mode'));
-          onFieldsChanged();
-        });
-      });
-      specificInput.addEventListener('input', WUS.debounce(function () {
-        state[def.key].specific = parseSpecificInput(def, specificInput.value);
-        onFieldsChanged();
-      }, 200));
-      rangeFrom.addEventListener('input', function () { readRangeInputs(def); onFieldsChanged(); });
-      rangeTo.addEventListener('input', function () { readRangeInputs(def); onFieldsChanged(); });
-      stepInput.addEventListener('input', function () {
-        var n = parseInt(stepInput.value, 10);
-        state[def.key].step = isNaN(n) ? 1 : n;
-        onFieldsChanged();
-      });
-    });
-  }
-
-  function setFieldMode(key, mode) {
-    state[key].mode = mode;
-    var c = cards[key];
-    c.modeButtons.forEach(function (btn) {
-      var active = btn.getAttribute('data-mode') === mode;
-      btn.setAttribute('aria-selected', active ? 'true' : 'false');
-      btn.classList.toggle('is-active', active);
-    });
-    Object.keys(c.panels).forEach(function (m) { c.panels[m].hidden = (m !== mode); });
-  }
-
-  function readRangeInputs(def) {
-    var from = parseInt(cards[def.key].rangeFrom.value, 10);
-    var to = parseInt(cards[def.key].rangeTo.value, 10);
-    state[def.key].range = [isNaN(from) ? def.min : from, isNaN(to) ? def.min : to];
-  }
-
-  /* =================================================================
-     PARSING helpers — resolve a token (number or name) to a number
-     ================================================================= */
-  function resolveToken(def, token) {
-    token = String(token).trim();
-    if (!token) return NaN;
-    if (/^-?\d+$/.test(token)) return parseInt(token, 10);
-    if (def.names) {
-      var idx = def.names.indexOf(token.toUpperCase());
-      if (idx > -1) return def.key === 'month' ? idx + 1 : idx; // months are 1-based, dow is 0-based
+  function parseCronField(raw, def) {
+    if (raw === undefined || raw === null || raw === '') {
+      throw new Error('field is empty');
     }
-    return NaN;
-  }
-
-  function parseSpecificInput(def, raw) {
-    return raw.split(',').map(function (t) { return resolveToken(def, t); }).filter(function (n) { return !isNaN(n); });
-  }
-
-  function normalizeDowValue(def, v) {
-    return (def.key === 'dow' && v === 7) ? 0 : v;
-  }
-
-  /* =================================================================
-     VALIDATION — returns error string or null, per field
-     ================================================================= */
-  function validateField(def) {
-    var s = state[def.key];
-    if (s.mode === 'every') return null;
-    if (s.mode === 'specific') {
-      if (!s.specific.length) return 'Enter at least one value';
-      for (var i = 0; i < s.specific.length; i++) {
-        var v = s.specific[i];
-        if (v < def.min || v > def.max) return 'Values must be between ' + def.min + ' and ' + def.max;
-      }
-      return null;
-    }
-    if (s.mode === 'range') {
-      var from = s.range[0], to = s.range[1];
-      if (isNaN(from) || isNaN(to)) return 'Enter both range bounds';
-      if (from < def.min || to > def.max) return 'Range must fit within ' + def.min + '–' + def.max;
-      if (from > to) return '"From" must not exceed "through"';
-      return null;
-    }
-    if (s.mode === 'step') {
-      if (!s.step || s.step < 1) return 'Step must be at least 1';
-      if (s.step > (def.max - def.min + 1)) return 'Step is larger than the field range';
-      return null;
-    }
-    return null;
-  }
-
-  function validateAll() {
-    var anyError = false;
-    FIELD_DEFS.forEach(function (def) {
-      var err = validateField(def);
-      state[def.key].error = err;
-      var c = cards[def.key];
-      c.root.classList.toggle('has-error', !!err);
-      c.error.hidden = !err;
-      c.error.textContent = err || '';
-      if (err) anyError = true;
-    });
-    return !anyError;
-  }
-
-  /* =================================================================
-     FIELD STATE  <->  CRON TOKEN
-     ================================================================= */
-  function fieldToToken(def) {
-    var s = state[def.key];
-    if (s.mode === 'every') return '*';
-    if (s.mode === 'specific') {
-      if (!s.specific.length) return '*';
-      return s.specific.slice().sort(function (a, b) { return a - b; }).join(',');
-    }
-    if (s.mode === 'range') return s.range[0] + '-' + s.range[1];
-    if (s.mode === 'step') return '*/' + s.step;
-    return '*';
-  }
-
-  function tokenToFieldState(def, token) {
-    token = token.trim();
-    if (token === '*' || token === '') return { mode: 'every', specific: [], range: [def.min, def.min], step: 1 };
-
-    var mStep = /^\*\/(\d+)$/.exec(token);
-    if (mStep) return { mode: 'step', specific: [], range: [def.min, def.min], step: parseInt(mStep[1], 10) };
-
-    if (token.indexOf(',') > -1) {
-      var vals = token.split(',').map(function (t) { return resolveToken(def, t); }).filter(function (n) { return !isNaN(n); });
-      return { mode: 'specific', specific: vals, range: [def.min, def.min], step: 1 };
-    }
-
-    var mRange = /^([A-Za-z0-9]+)-([A-Za-z0-9]+)$/.exec(token);
-    if (mRange) {
-      var from = resolveToken(def, mRange[1]), to = resolveToken(def, mRange[2]);
-      if (!isNaN(from) && !isNaN(to)) return { mode: 'range', specific: [], range: [from, to], step: 1 };
-    }
-
-    var single = resolveToken(def, token);
-    if (!isNaN(single)) return { mode: 'specific', specific: [single], range: [def.min, def.min], step: 1 };
-
-    return null; // unparsable
-  }
-
-  /* =================================================================
-     RAW <-> FIELDS SYNC
-     ================================================================= */
-  function updateRawFromFields() {
-    if (syncing) return;
-    syncing = true;
-    rawInput.value = FIELD_DEFS.map(fieldToToken).join(' ');
-    syncing = false;
-  }
-
-  function applyFieldStateToUI(def, s) {
-    state[def.key] = s;
-    setFieldMode(def.key, s.mode);
-    cards[def.key].specificInput.value = s.specific.join(',');
-    cards[def.key].rangeFrom.value = s.range[0];
-    cards[def.key].rangeTo.value = s.range[1];
-    cards[def.key].stepInput.value = s.step;
-  }
-
-  function updateFieldsFromRaw() {
-    if (syncing) return;
-    var raw = rawInput.value.trim();
-    var parts = raw.split(/\s+/).filter(Boolean);
-    if (parts.length !== 5) {
-      rawError.hidden = false;
-      rawError.textContent = 'A cron expression needs exactly 5 space-separated fields (minute hour day-of-month month day-of-week). Got ' + parts.length + '.';
-      setStatus('error', 'Invalid expression');
-      return;
-    }
-    var parsed = [];
-    var bad = -1;
-    for (var i = 0; i < FIELD_DEFS.length; i++) {
-      var s = tokenToFieldState(FIELD_DEFS[i], parts[i]);
-      if (!s) { bad = i; break; }
-      parsed.push(s);
-    }
-    if (bad > -1) {
-      rawError.hidden = false;
-      rawError.textContent = 'Could not parse the "' + FIELD_DEFS[bad].label + '" field: "' + parts[bad] + '"';
-      setStatus('error', 'Invalid expression');
-      return;
-    }
-    rawError.hidden = true;
-    syncing = true;
-    FIELD_DEFS.forEach(function (def, i) { applyFieldStateToUI(def, parsed[i]); });
-    syncing = false;
-    render(false);
-  }
-
-  /* =================================================================
-     EXPANSION — cron field state -> Set of matching numeric values
-     ================================================================= */
-  function expandField(def, s) {
+    var min = def.min, max = def.max;
+    var boundsMax = def.aliasSevenToZero ? 7 : max;
     var set = new Set();
-    if (s.mode === 'every') {
-      for (var i = def.min; i <= def.max; i++) set.add(normalizeDowValue(def, i));
-    } else if (s.mode === 'specific') {
-      s.specific.forEach(function (v) { set.add(normalizeDowValue(def, v)); });
-    } else if (s.mode === 'range') {
-      var from = Math.min(s.range[0], s.range[1]), to = Math.max(s.range[0], s.range[1]);
-      for (var j = from; j <= to; j++) set.add(normalizeDowValue(def, j));
-    } else if (s.mode === 'step') {
-      for (var k = def.min; k <= def.max; k += s.step) set.add(normalizeDowValue(def, k));
+
+    function normalize(v) {
+      return (def.aliasSevenToZero && v === 7) ? 0 : v;
+    }
+    function checkBounds(v, ctx) {
+      if (isNaN(v) || v < min || v > boundsMax) {
+        throw new Error('value out of range (' + min + '-' + max + '): "' + ctx + '"');
+      }
+    }
+
+    var parts = String(raw).split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].trim();
+      if (part === '') throw new Error('empty item in list');
+      var m;
+
+      if (part === '*') {
+        for (var v0 = min; v0 <= max; v0++) set.add(normalize(v0));
+        continue;
+      }
+      if ((m = /^\*\/(\d+)$/.exec(part))) {
+        var step0 = parseInt(m[1], 10);
+        if (step0 <= 0) throw new Error('step must be positive: "' + part + '"');
+        for (var v1 = min; v1 <= max; v1 += step0) set.add(normalize(v1));
+        continue;
+      }
+      if ((m = /^(\d+)-(\d+)\/(\d+)$/.exec(part))) {
+        var a1 = parseInt(m[1], 10), b1 = parseInt(m[2], 10), step1 = parseInt(m[3], 10);
+        if (step1 <= 0) throw new Error('step must be positive: "' + part + '"');
+        checkBounds(a1, part); checkBounds(b1, part);
+        if (a1 > b1) throw new Error('range start greater than end: "' + part + '"');
+        for (var v2 = a1; v2 <= b1; v2 += step1) set.add(normalize(v2));
+        continue;
+      }
+      if ((m = /^(\d+)-(\d+)$/.exec(part))) {
+        var a2 = parseInt(m[1], 10), b2 = parseInt(m[2], 10);
+        checkBounds(a2, part); checkBounds(b2, part);
+        if (a2 > b2) throw new Error('range start greater than end: "' + part + '"');
+        for (var v3 = a2; v3 <= b2; v3++) set.add(normalize(v3));
+        continue;
+      }
+      if ((m = /^(\d+)\/(\d+)$/.exec(part))) {
+        var a3 = parseInt(m[1], 10), step3 = parseInt(m[2], 10);
+        if (step3 <= 0) throw new Error('step must be positive: "' + part + '"');
+        checkBounds(a3, part);
+        for (var v4 = a3; v4 <= max; v4 += step3) set.add(normalize(v4));
+        continue;
+      }
+      if (/^\d+$/.test(part)) {
+        var v5 = parseInt(part, 10);
+        checkBounds(v5, part);
+        set.add(normalize(v5));
+        continue;
+      }
+      throw new Error('invalid value "' + part + '"');
     }
     return set;
+  }
+
+  var FIELD_LABELS = { minute: 'Minute', hour: 'Hour', dom: 'Day-of-month', month: 'Month', dow: 'Day-of-week' };
+
+  function parseCronExpression(raw) {
+    var trimmed = (raw || '').trim();
+    if (!trimmed) throw new Error('Expression is empty');
+    var parts = trimmed.split(/\s+/);
+    if (parts.length !== 5) {
+      throw new Error('Expected 5 space-separated fields (minute hour day-of-month month day-of-week), got ' + parts.length);
+    }
+    var result = { minute: null, hour: null, dom: null, month: null, dow: null, raw: {} };
+    for (var i = 0; i < FIELD_DEFS.length; i++) {
+      var def = FIELD_DEFS[i];
+      try {
+        result[def.key] = parseCronField(parts[i], def);
+      } catch (e) {
+        throw new Error(FIELD_LABELS[def.key] + ' field: ' + e.message);
+      }
+      result.raw[def.key] = parts[i];
+    }
+    result.domRestricted = result.raw.dom !== '*';
+    result.dowRestricted = result.raw.dow !== '*';
+    return result;
   }
 
   /* =================================================================
      HUMAN-READABLE EXPLANATION (from scratch, no library)
      ================================================================= */
-  function listWords(names) {
-    if (names.length === 1) return names[0];
-    if (names.length === 2) return names[0] + ' and ' + names[1];
-    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  function pad2(n) { n = parseInt(n, 10); return (n < 10 ? '0' : '') + n; }
+
+  function ordinal(n) {
+    var suf = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (suf[(v - 20) % 10] || suf[v] || suf[0]);
   }
 
-  function describeValues(def, values, fullNames) {
-    var sorted = values.slice().sort(function (a, b) { return a - b; });
-    if (fullNames) {
-      var names = sorted.map(function (v) {
-        return def.key === 'month' ? MONTH_FULL[v - 1] : DOW_FULL[v === 7 ? 0 : v];
-      });
-      return listWords(names);
+  function isStar(s) { return s === '*'; }
+  function isSingle(s) { return /^\d+$/.test(s); }
+
+  function describeMinuteOrHour(raw, singular, plural, ordinalForStep) {
+    if (raw === '*') return 'every ' + singular;
+    var m;
+    if ((m = /^\*\/(\d+)$/.exec(raw))) {
+      return ordinalForStep ? ('every ' + ordinal(parseInt(m[1], 10)) + ' ' + singular) : ('every ' + m[1] + ' ' + plural);
     }
-    return listWords(sorted.map(String));
+    if (/^\d+$/.test(raw)) return singular + ' ' + raw;
+    if ((m = /^(\d+)-(\d+)\/(\d+)$/.exec(raw))) return 'every ' + m[3] + ' ' + plural + ' from ' + m[1] + ' to ' + m[2];
+    if ((m = /^(\d+)-(\d+)$/.exec(raw))) return plural + ' ' + m[1] + ' through ' + m[2];
+    if ((m = /^(\d+)\/(\d+)$/.exec(raw))) return 'every ' + m[2] + ' ' + plural + ' starting at ' + m[1];
+    var items = raw.split(',');
+    return plural + ' ' + items.join(', ');
   }
 
-  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function normalizeDow(v) { return v === 7 ? 0 : v; }
 
-  function buildExplanation() {
-    var minute = state.minute, hour = state.hour, dom = state.dom, month = state.month, dow = state.dow;
-    var clauses = [];
+  function describeDom(raw) {
+    var m;
+    if (/^\d+$/.test(raw)) return 'day ' + raw + ' of the month';
+    if ((m = /^(\d+)-(\d+)\/(\d+)$/.exec(raw))) return 'every ' + m[3] + ' days of the month from ' + m[1] + ' to ' + m[2];
+    if ((m = /^(\d+)-(\d+)$/.exec(raw))) return 'days ' + m[1] + ' through ' + m[2] + ' of the month';
+    if ((m = /^\*\/(\d+)$/.exec(raw))) return 'every ' + m[1] + ' days of the month';
+    if ((m = /^(\d+)\/(\d+)$/.exec(raw))) return 'every ' + m[2] + ' days of the month starting on day ' + m[1];
+    var items = raw.split(',');
+    return 'days ' + items.join(', ') + ' of the month';
+  }
 
-    // ---- time (minute + hour) clause ----
-    var timeClause;
-    if (minute.mode === 'every' && hour.mode === 'every') {
-      timeClause = 'Every minute';
-    } else if (minute.mode === 'specific' && minute.specific.length === 1 && hour.mode === 'specific' && hour.specific.length === 1) {
-      timeClause = 'At ' + pad2(hour.specific[0]) + ':' + pad2(minute.specific[0]);
+  function describeDow(raw) {
+    if (raw === '1-5') return 'weekdays';
+    if (raw === '0,6' || raw === '6,0') return 'weekends';
+    var m;
+    if (/^\d+$/.test(raw)) return DOW_NAMES[normalizeDow(parseInt(raw, 10))];
+    if ((m = /^(\d+)-(\d+)$/.exec(raw))) return 'from ' + DOW_NAMES[normalizeDow(parseInt(m[1], 10))] + ' through ' + DOW_NAMES[normalizeDow(parseInt(m[2], 10))];
+    if ((m = /^\*\/(\d+)$/.exec(raw))) return 'every ' + m[1] + ' days of the week';
+    var items = raw.split(',').map(function (it) {
+      return /^\d+$/.test(it) ? DOW_NAMES[normalizeDow(parseInt(it, 10))] : it;
+    });
+    return items.join(', ');
+  }
+
+  function describeMonth(raw) {
+    var m;
+    if (/^\d+$/.test(raw)) return 'in ' + MONTH_NAMES[parseInt(raw, 10) - 1];
+    if ((m = /^(\d+)-(\d+)$/.exec(raw))) return 'from ' + MONTH_NAMES[parseInt(m[1], 10) - 1] + ' through ' + MONTH_NAMES[parseInt(m[2], 10) - 1];
+    if ((m = /^\*\/(\d+)$/.exec(raw))) return 'every ' + m[1] + ' months';
+    var items = raw.split(',').map(function (it) {
+      return /^\d+$/.test(it) ? MONTH_NAMES[parseInt(it, 10) - 1] : it;
+    });
+    return 'in ' + items.join(', ');
+  }
+
+  function buildExplanation(parsed) {
+    var r = parsed.raw;
+    var timePhrase;
+
+    if (isStar(r.minute) && isStar(r.hour)) {
+      timePhrase = 'Every minute';
+    } else if (isSingle(r.minute) && isSingle(r.hour)) {
+      timePhrase = 'At ' + pad2(r.hour) + ':' + pad2(r.minute);
+    } else if (isStar(r.hour)) {
+      timePhrase = 'At ' + describeMinuteOrHour(r.minute, 'minute', 'minutes', false) + ' past every hour';
+    } else if (isStar(r.minute)) {
+      timePhrase = 'Every minute during ' + describeMinuteOrHour(r.hour, 'hour', 'hours', false);
     } else {
-      var minutePart;
-      if (minute.mode === 'every') minutePart = 'every minute';
-      else if (minute.mode === 'specific') minutePart = (minute.specific.length === 1 ? 'at minute ' : 'at minutes ') + describeValues(defByKey('minute'), minute.specific, false);
-      else if (minute.mode === 'range') minutePart = 'every minute from ' + minute.range[0] + ' through ' + minute.range[1];
-      else minutePart = 'every ' + minute.step + ' minute(s)';
-
-      var hourPart;
-      if (hour.mode === 'every') hourPart = 'past every hour';
-      else if (hour.mode === 'specific') hourPart = (hour.specific.length === 1 ? 'during hour ' : 'during hours ') + describeValues(defByKey('hour'), hour.specific, false);
-      else if (hour.mode === 'range') hourPart = 'during hours ' + hour.range[0] + ' through ' + hour.range[1];
-      else hourPart = 'every ' + hour.step + ' hour(s)';
-
-      timeClause = minutePart.charAt(0).toUpperCase() + minutePart.slice(1) + ' ' + hourPart;
-    }
-    clauses.push(timeClause);
-
-    // ---- day-of-month / day-of-week clause (cron OR-union semantics) ----
-    var domRestricted = dom.mode !== 'every';
-    var dowRestricted = dow.mode !== 'every';
-
-    function domDescribe() {
-      if (dom.mode === 'specific') return (dom.specific.length === 1 ? 'day ' : 'days ') + describeValues(defByKey('dom'), dom.specific, false) + ' of the month';
-      if (dom.mode === 'range') return 'days ' + dom.range[0] + ' through ' + dom.range[1] + ' of the month';
-      if (dom.mode === 'step') return 'every ' + dom.step + ' day(s) of the month';
-      return '';
-    }
-    function dowDescribe() {
-      if (dow.mode === 'specific') return describeValues(defByKey('dow'), dow.specific, true);
-      if (dow.mode === 'range') return DOW_FULL[dow.range[0] % 7] + ' through ' + DOW_FULL[dow.range[1] % 7];
-      if (dow.mode === 'step') return 'every ' + dow.step + ' day(s) of the week';
-      return '';
+      timePhrase = 'At ' + describeMinuteOrHour(r.minute, 'minute', 'minutes', false) + ' past ' + describeMinuteOrHour(r.hour, 'hour', 'hours', true);
     }
 
-    if (domRestricted && dowRestricted) {
-      clauses.push('on ' + domDescribe() + ', or on ' + dowDescribe());
-    } else if (domRestricted) {
-      clauses.push('only on ' + domDescribe());
-    } else if (dowRestricted) {
-      clauses.push('only on ' + dowDescribe());
+    var dayPhrase;
+    if (!parsed.domRestricted && !parsed.dowRestricted) {
+      dayPhrase = 'every day';
+    } else if (parsed.domRestricted && !parsed.dowRestricted) {
+      dayPhrase = 'on ' + describeDom(r.dom);
+    } else if (!parsed.domRestricted && parsed.dowRestricted) {
+      dayPhrase = 'on ' + describeDow(r.dow);
+    } else {
+      dayPhrase = 'on ' + describeDom(r.dom) + ', or on ' + describeDow(r.dow);
     }
 
-    // ---- month clause ----
-    if (month.mode !== 'every') {
-      var monthPart;
-      if (month.mode === 'specific') monthPart = 'in ' + describeValues(defByKey('month'), month.specific, true);
-      else if (month.mode === 'range') monthPart = 'from ' + MONTH_FULL[month.range[0] - 1] + ' through ' + MONTH_FULL[month.range[1] - 1];
-      else monthPart = 'every ' + month.step + ' month(s)';
-      clauses.push(monthPart);
-    }
+    var monthPhrase = isStar(r.month) ? '' : describeMonth(r.month);
 
-    var sentence = clauses.join(', ') + '.';
+    var sentence = timePhrase + ', ' + dayPhrase + (monthPhrase ? ', ' + monthPhrase : '') + '.';
     return sentence.charAt(0).toUpperCase() + sentence.slice(1);
   }
 
   /* =================================================================
      NEXT-RUN CALCULATOR (from scratch, no library)
+     Walks forward day by day (bounded), and within each matching day
+     enumerates the sorted hour x minute combinations that fall after
+     "now". Standard cron day-of-month / day-of-week OR semantics:
+     if both fields are restricted, a day matches if EITHER matches;
+     if only one is restricted, only that one must match.
      ================================================================= */
-  function computeNextRuns(count, fromDate) {
-    var minuteSet = expandField(defByKey('minute'), state.minute);
-    var hourSet = expandField(defByKey('hour'), state.hour);
-    var domSet = expandField(defByKey('dom'), state.dom);
-    var monthSet = expandField(defByKey('month'), state.month);
-    var dowSet = expandField(defByKey('dow'), state.dow);
-    var domRestricted = state.dom.mode !== 'every';
-    var dowRestricted = state.dow.mode !== 'every';
+  var MAX_SEARCH_DAYS = 4 * 366; // ~4-year safety cap
+
+  function computeNextRuns(parsed, fromDate, count) {
+    var minuteList = Array.prototype.slice.call(parsed.minute).sort(function (a, b) { return a - b; });
+    var hourList = Array.prototype.slice.call(parsed.hour).sort(function (a, b) { return a - b; });
 
     var results = [];
-    var d = new Date(fromDate.getTime());
-    d.setSeconds(0, 0);
-    d.setMinutes(d.getMinutes() + 1);
+    var startBoundary = new Date(fromDate.getTime());
+    startBoundary.setSeconds(0, 0);
+    startBoundary.setMinutes(startBoundary.getMinutes() + 1);
 
-    var MAX_STEPS = 4 * 366 * 24 * 60; // ~4 years' worth of minutes, as a hard safety cap
-    var steps = 0;
+    var baseYear = fromDate.getFullYear(), baseMonth = fromDate.getMonth(), baseDate = fromDate.getDate();
 
-    while (results.length < count && steps < MAX_STEPS) {
-      steps++;
-      var mon = d.getMonth() + 1;
-      if (!monthSet.has(mon)) {
-        d.setMonth(d.getMonth() + 1, 1);
-        d.setHours(0, 0, 0, 0);
-        continue;
+    for (var d = 0; d < MAX_SEARCH_DAYS && results.length < count; d++) {
+      var dayDate = new Date(baseYear, baseMonth, baseDate + d, 0, 0, 0, 0);
+      var month = dayDate.getMonth() + 1;
+      if (!parsed.month.has(month)) continue;
+
+      var domOk = parsed.dom.has(dayDate.getDate());
+      var dowOk = parsed.dow.has(dayDate.getDay());
+      var dayMatches;
+      if (parsed.domRestricted && parsed.dowRestricted) dayMatches = domOk || dowOk;
+      else if (parsed.domRestricted) dayMatches = domOk;
+      else if (parsed.dowRestricted) dayMatches = dowOk;
+      else dayMatches = true;
+      if (!dayMatches) continue;
+
+      for (var hi = 0; hi < hourList.length && results.length < count; hi++) {
+        for (var mi = 0; mi < minuteList.length && results.length < count; mi++) {
+          var candidate = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), hourList[hi], minuteList[mi], 0, 0);
+          if (candidate.getTime() >= startBoundary.getTime()) {
+            results.push(candidate);
+          }
+        }
       }
-      var dom_ = d.getDate();
-      var dow_ = d.getDay();
-      var dayMatches = (domRestricted && dowRestricted) ? (domSet.has(dom_) || dowSet.has(dow_))
-        : domRestricted ? domSet.has(dom_)
-        : dowRestricted ? dowSet.has(dow_)
-        : true;
-      if (!dayMatches) {
-        d.setDate(d.getDate() + 1);
-        d.setHours(0, 0, 0, 0);
-        continue;
-      }
-      var hr = d.getHours();
-      if (!hourSet.has(hr)) {
-        d.setHours(d.getHours() + 1, 0, 0, 0);
-        continue;
-      }
-      var min = d.getMinutes();
-      if (!minuteSet.has(min)) {
-        d.setMinutes(d.getMinutes() + 1);
-        continue;
-      }
-      results.push(new Date(d.getTime()));
-      d.setMinutes(d.getMinutes() + 1);
     }
     return results;
   }
@@ -458,31 +280,136 @@
     return 'in under a minute';
   }
 
-  function renderRuns() {
-    var runs = computeNextRuns(5, new Date());
-    runsList.innerHTML = '';
-    if (!runs.length) {
-      runsEmpty.hidden = false;
-      return;
+  /* =================================================================
+     PICKER STATE
+     One entry per field: { mode, specific, rangeFrom, rangeTo, step, list }
+     ================================================================= */
+  var pickerState = {};
+  FIELD_DEFS.forEach(function (def) {
+    pickerState[def.key] = { mode: 'every', specific: def.min, rangeFrom: def.min, rangeTo: def.max, step: 1, list: '' };
+  });
+
+  /* =================================================================
+     DOM refs
+     ================================================================= */
+  var rawInput = document.getElementById('rawInput');
+  var presetSelect = document.getElementById('presetSelect');
+  var btnApply = document.getElementById('btnApply');
+  var btnCopy = document.getElementById('btnCopy');
+
+  var statusBadge = document.getElementById('statusBadge');
+  var statusText = document.getElementById('statusText');
+
+  var errorPanel = document.getElementById('errorPanel');
+  var errorMsg = document.getElementById('errorMsg');
+
+  var explainPanel = document.getElementById('explainPanel');
+  var explainText = document.getElementById('explainText');
+
+  var runsPanel = document.getElementById('runsPanel');
+  var runsList = document.getElementById('runsList');
+  var runsEmpty = document.getElementById('runsEmpty');
+
+  var cardEls = {}; // key -> { root, modeButtons, panels, specific, rangeFrom, rangeTo, step, list, preview }
+
+  FIELD_DEFS.forEach(function (def) {
+    var root = document.querySelector('.field-card[data-field="' + def.key + '"]');
+    cardEls[def.key] = {
+      root: root,
+      modeButtons: Array.prototype.slice.call(root.querySelectorAll('[data-role="mode"] button')),
+      panels: {
+        specific: root.querySelector('[data-mode-panel="specific"]'),
+        range: root.querySelector('[data-mode-panel="range"]'),
+        step: root.querySelector('[data-mode-panel="step"]'),
+        list: root.querySelector('[data-mode-panel="list"]')
+      },
+      specific: root.querySelector('[data-role="specific"]'),
+      rangeFrom: root.querySelector('[data-role="range-from"]'),
+      rangeTo: root.querySelector('[data-role="range-to"]'),
+      step: root.querySelector('[data-role="step"]'),
+      list: root.querySelector('[data-role="list"]'),
+      preview: root.querySelector('[data-role="preview"]')
+    };
+  });
+
+  /* =================================================================
+     PICKER <-> RAW FIELD SERIALIZATION
+     ================================================================= */
+  function serializeField(key) {
+    var s = pickerState[key];
+    var def = defByKey(key);
+    if (s.mode === 'every') return '*';
+    if (s.mode === 'specific') return String(s.specific);
+    if (s.mode === 'range') return s.rangeFrom + '-' + s.rangeTo;
+    if (s.mode === 'step') return '*/' + (s.step || 1);
+    if (s.mode === 'list') return (s.list || '').trim() || '*';
+    return '*';
+  }
+
+  function deserializeRawFieldToState(key, rawFieldStr) {
+    var def = defByKey(key);
+    var s = pickerState[key];
+    var m;
+    if (rawFieldStr === '*') {
+      s.mode = 'every';
+    } else if (/^\d+$/.test(rawFieldStr)) {
+      s.mode = 'specific';
+      s.specific = clampInt(parseInt(rawFieldStr, 10), def);
+    } else if ((m = /^(\d+)-(\d+)$/.exec(rawFieldStr))) {
+      s.mode = 'range';
+      s.rangeFrom = clampInt(parseInt(m[1], 10), def);
+      s.rangeTo = clampInt(parseInt(m[2], 10), def);
+    } else if ((m = /^\*\/(\d+)$/.exec(rawFieldStr))) {
+      s.mode = 'step';
+      s.step = Math.max(1, parseInt(m[1], 10) || 1);
+    } else {
+      s.mode = 'list';
+      s.list = rawFieldStr;
     }
-    runsEmpty.hidden = true;
-    var now = new Date();
-    runs.forEach(function (d) {
-      var li = document.createElement('li');
-      var main = document.createElement('span');
-      main.textContent = d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-      var rel = document.createElement('span');
-      rel.className = 'rel';
-      rel.textContent = formatRelative(d.getTime() - now.getTime());
-      li.appendChild(main);
-      li.appendChild(rel);
-      runsList.appendChild(li);
+    applyFieldStateToInputs(key);
+  }
+
+  function clampInt(v, def) {
+    var max = def.aliasSevenToZero ? 6 : def.max;
+    if (isNaN(v)) return def.min;
+    return Math.min(max, Math.max(def.min, v));
+  }
+
+  /* Reflect pickerState[key] into the DOM without dispatching events. */
+  function applyFieldStateToInputs(key) {
+    var s = pickerState[key];
+    var c = cardEls[key];
+
+    c.modeButtons.forEach(function (btn) {
+      var active = btn.getAttribute('data-mode') === s.mode;
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.classList.toggle('is-active', active);
     });
+    Object.keys(c.panels).forEach(function (m) {
+      if (c.panels[m]) c.panels[m].hidden = (m !== s.mode);
+    });
+
+    if (c.specific) c.specific.value = String(s.specific);
+    if (c.rangeFrom) c.rangeFrom.value = String(s.rangeFrom);
+    if (c.rangeTo) c.rangeTo.value = String(s.rangeTo);
+    if (c.step) c.step.value = String(s.step);
+    if (c.list) c.list.value = s.list;
+
+    if (c.preview) c.preview.textContent = serializeField(key);
   }
 
   /* =================================================================
-     STATUS
+     SYNC ORCHESTRATION
      ================================================================= */
+  function rebuildRawFromPickers() {
+    var parts = FIELD_DEFS.map(function (def) { return serializeField(def.key); });
+    var raw = parts.join(' ');
+    rawInput.value = raw;
+    FIELD_DEFS.forEach(function (def) { cardEls[def.key].preview.textContent = parts[FIELD_DEFS.indexOf(def)]; });
+    processExpression(raw, { source: 'pickers' });
+    persistDebounced();
+  }
+
   function setStatus(kind, text) {
     statusBadge.classList.remove('is-valid', 'is-error');
     if (kind === 'valid') statusBadge.classList.add('is-valid');
@@ -490,43 +417,157 @@
     statusText.textContent = text;
   }
 
-  /* =================================================================
-     RENDER — recompute raw, explanation, runs, status
-     ================================================================= */
-  function render(updateRaw) {
-    var ok = validateAll();
-    if (updateRaw !== false) updateRawFromFields();
-    if (!ok) {
-      rawError.hidden = true; // field-level errors are shown per-card
-      setStatus('error', 'Invalid field value');
-      explainText.textContent = 'Fix the highlighted field(s) to see an explanation.';
-      runsList.innerHTML = '';
-      runsEmpty.hidden = true;
-      persist();
+  function showError(err) {
+    errorMsg.textContent = err.message;
+    errorPanel.hidden = false;
+    explainPanel.hidden = true;
+    runsPanel.hidden = true;
+  }
+
+  function clearError() {
+    errorPanel.hidden = true;
+    explainPanel.hidden = false;
+    runsPanel.hidden = false;
+  }
+
+  function renderExplanation(parsed) {
+    explainText.textContent = buildExplanation(parsed);
+  }
+
+  function renderNextRuns(parsed) {
+    var runs = computeNextRuns(parsed, new Date(), 5);
+    runsList.innerHTML = '';
+    if (!runs.length) {
+      runsEmpty.hidden = false;
       return;
     }
-    explainText.textContent = buildExplanation();
-    renderRuns();
-    setStatus('valid', 'Valid expression');
-    persist();
+    runsEmpty.hidden = true;
+    var now = new Date();
+    runs.forEach(function (d, idx) {
+      var li = document.createElement('li');
+      var index = document.createElement('span');
+      index.className = 'run-index';
+      index.textContent = '#' + (idx + 1);
+      var main = document.createElement('span');
+      main.textContent = WUS.formatDate(d.getTime());
+      var rel = document.createElement('span');
+      rel.className = 'run-rel';
+      rel.textContent = formatRelative(d.getTime() - now.getTime());
+      li.appendChild(index);
+      li.appendChild(main);
+      li.appendChild(rel);
+      runsList.appendChild(li);
+    });
   }
 
-  function onFieldsChanged() { render(true); }
+  function processExpression(raw, opts) {
+    opts = opts || {};
+    try {
+      var parsed = parseCronExpression(raw);
+      clearError();
+      setStatus('valid', 'Valid expression');
+      renderExplanation(parsed);
+      renderNextRuns(parsed);
+      if (opts.source !== 'pickers') {
+        FIELD_DEFS.forEach(function (def) { deserializeRawFieldToState(def.key, parsed.raw[def.key]); });
+      }
+    } catch (err) {
+      setStatus('error', 'Invalid expression');
+      showError(err);
+      if (opts.source !== 'pickers') {
+        var fields = (raw || '').trim().split(/\s+/);
+        if (fields.length === 5) {
+          FIELD_DEFS.forEach(function (def, i) { deserializeRawFieldToState(def.key, fields[i]); });
+        }
+      }
+    }
+  }
 
   /* =================================================================
-     ACTIONS
+     WIRING — field-card mode buttons + inputs
      ================================================================= */
-  function copyRaw() {
-    WUS.copy(rawInput.value, 'Expression copied to clipboard');
-  }
+  FIELD_DEFS.forEach(function (def) {
+    var c = cardEls[def.key];
+    var s = pickerState[def.key];
 
-  function resetAll() {
-    FIELD_DEFS.forEach(function (def) {
-      applyFieldStateToUI(def, { mode: 'every', specific: [], range: [def.min, def.min], step: 1 });
+    c.modeButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        s.mode = btn.getAttribute('data-mode');
+        applyFieldStateToInputs(def.key);
+        rebuildRawFromPickers();
+      });
     });
-    render(true);
-    WUS.toast('Reset to every minute');
-  }
+
+    if (c.specific) {
+      c.specific.addEventListener('input', function () {
+        s.specific = clampInt(parseInt(c.specific.value, 10), def);
+        c.preview.textContent = serializeField(def.key);
+        rebuildRawFromPickers();
+      });
+    }
+    if (c.rangeFrom) {
+      c.rangeFrom.addEventListener('input', function () {
+        s.rangeFrom = clampInt(parseInt(c.rangeFrom.value, 10), def);
+        rebuildRawFromPickers();
+      });
+    }
+    if (c.rangeTo) {
+      c.rangeTo.addEventListener('input', function () {
+        s.rangeTo = clampInt(parseInt(c.rangeTo.value, 10), def);
+        rebuildRawFromPickers();
+      });
+    }
+    if (c.step) {
+      c.step.addEventListener('input', function () {
+        var n = parseInt(c.step.value, 10);
+        s.step = (isNaN(n) || n < 1) ? 1 : n;
+        rebuildRawFromPickers();
+      });
+    }
+    if (c.list) {
+      c.list.addEventListener('input', function () {
+        s.list = c.list.value;
+        rebuildRawFromPickers();
+      });
+    }
+  });
+
+  /* =================================================================
+     WIRING — toolbar (raw input, presets, apply, copy)
+     ================================================================= */
+  rawInput.addEventListener('input', function () {
+    processExpression(rawInput.value, { source: 'raw' });
+    persistDebounced();
+  });
+
+  btnApply.addEventListener('click', function () {
+    processExpression(rawInput.value, { source: 'raw' });
+    persist();
+    WUS.toast('Expression applied');
+  });
+
+  btnCopy.addEventListener('click', function () {
+    if (!rawInput.value.trim()) { WUS.toast('Nothing to copy', 'error'); return; }
+    WUS.copy(rawInput.value, 'Expression copied to clipboard');
+  });
+
+  presetSelect.addEventListener('change', function () {
+    if (!presetSelect.value) return;
+    rawInput.value = presetSelect.value;
+    processExpression(rawInput.value, { source: 'raw' });
+    persist();
+    WUS.toast('Preset loaded');
+    presetSelect.value = '';
+  });
+
+  rawInput.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      processExpression(rawInput.value, { source: 'raw' });
+      persist();
+      WUS.toast('Expression applied');
+    }
+  });
 
   /* =================================================================
      PERSISTENCE
@@ -534,15 +575,13 @@
   function persist() {
     WUS.store.set(STORE_KEY, { raw: rawInput.value });
   }
+  var persistDebounced = WUS.debounce(persist, 400);
 
   function restore() {
     var saved = WUS.store.get(STORE_KEY, null);
-    if (saved && typeof saved.raw === 'string' && saved.raw.trim()) {
-      rawInput.value = saved.raw;
-    } else {
-      rawInput.value = '* * * * *';
-    }
-    updateFieldsFromRaw();
+    var raw = (saved && typeof saved.raw === 'string' && saved.raw.trim()) ? saved.raw : DEFAULT_RAW;
+    rawInput.value = raw;
+    processExpression(raw, { source: 'raw' });
   }
 
   /* =================================================================
@@ -553,6 +592,7 @@
   var shortcutRows = document.getElementById('shortcutRows');
 
   var SHORTCUTS = [
+    { keys: ['mod', '⏎'], desc: 'Apply raw expression' },
     { keys: ['mod', 'C'], desc: 'Copy expression' },
     { keys: ['?'], desc: 'Show this help' },
     { keys: ['Esc'], desc: 'Close dialog' }
@@ -578,23 +618,27 @@
   for (var i = 0; i < helpBtns.length; i++) helpBtns[i].addEventListener('click', openHelp);
 
   /* =================================================================
-     WIRING
+     GLOBAL SHORTCUTS
      ================================================================= */
-  buildCards();
-
-  document.getElementById('btnCopyRaw').addEventListener('click', copyRaw);
-  document.getElementById('btnResetRaw').addEventListener('click', resetAll);
-
-  rawInput.addEventListener('input', WUS.debounce(function () { updateFieldsFromRaw(); }, 250));
-
+  WUS.registerShortcut('mod+enter', function () {
+    processExpression(rawInput.value, { source: 'raw' });
+    persist();
+    WUS.toast('Expression applied');
+  }, 'Apply raw expression');
   WUS.registerShortcut('mod+c', function () {
-    if (document.activeElement !== rawInput) copyRaw();
+    if (document.activeElement !== rawInput) {
+      if (rawInput.value.trim()) WUS.copy(rawInput.value, 'Expression copied to clipboard');
+    }
   }, 'Copy expression');
   WUS.registerShortcut('?', function () { openHelp(); }, 'Show shortcuts');
 
-  // Refresh the "next run" relative labels periodically so they stay accurate.
+  /* Keep the "in X minutes" relative labels fresh without a full re-parse. */
   setInterval(function () {
-    if (validateAll()) renderRuns();
+    if (!errorPanel.hidden) return;
+    try {
+      var parsed = parseCronExpression(rawInput.value);
+      renderNextRuns(parsed);
+    } catch (e) { /* ignore — status already reflects invalid state */ }
   }, 30000);
 
   /* =================================================================
