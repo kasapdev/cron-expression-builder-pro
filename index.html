@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08090d">
+  <meta name="description" content="Build cron expressions visually with a plain-English explanation and a next-5-run-times calculator — fast, private, offline.">
+  <title>Cron Expression Builder Pro — Web Utility Suite</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/css/base.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar container">
+    <a class="brand" href="https://github.com/kasapdev/web-utility-suite" aria-label="Back to Web Utility Suite">
+      <span class="logo" aria-hidden="true">
+        <!-- clock icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 7v5l3.5 2"/>
+        </svg>
+      </span>
+      <span class="col" style="gap:0">
+        <span>Cron Builder</span>
+        <span class="sub">Web Utility Suite</span>
+      </span>
+    </a>
+    <span class="spacer"></span>
+
+    <span id="statusBadge" class="badge" role="status" aria-live="polite" title="Expression status">
+      <span class="status-dot" aria-hidden="true"></span><span id="statusText">Ready</span>
+    </span>
+
+    <button class="btn btn--icon" data-shortcut-help title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="16" rx="2"/>
+        <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/>
+      </svg>
+    </button>
+    <button class="btn btn--icon" data-theme-toggle title="Toggle theme" aria-label="Toggle theme">
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+      </svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+  </header>
+
+  <main class="container">
+    <!-- Raw expression bar -->
+    <section class="panel raw-panel fade-in" aria-label="Raw cron expression">
+      <div class="raw-row">
+        <div class="field flex-1">
+          <label for="rawInput">Cron expression</label>
+          <input type="text" id="rawInput" class="mono" spellcheck="false" autocomplete="off"
+            aria-label="Raw cron expression" placeholder="* * * * *">
+        </div>
+        <button id="btnCopyRaw" class="btn btn--sm" title="Copy expression">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy
+        </button>
+        <button id="btnResetRaw" class="btn btn--sm btn--ghost" title="Reset to every minute">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+          Reset
+        </button>
+      </div>
+      <p id="rawError" class="error-msg mono" hidden></p>
+    </section>
+
+    <!-- Field pickers -->
+    <section class="fields-grid rise" aria-label="Cron fields" id="fieldsGrid">
+      <!-- Field cards injected by JS -->
+    </section>
+
+    <!-- Explanation -->
+    <section class="panel explain-panel fade-in" aria-label="Explanation">
+      <h2 class="pane-title">Explanation</h2>
+      <p id="explainText" class="explain-text">Every minute.</p>
+    </section>
+
+    <!-- Next runs -->
+    <section class="panel runs-panel fade-in" aria-label="Next run times">
+      <h2 class="pane-title">Next 5 run times</h2>
+      <ol id="runsList" class="runs-list mono"></ol>
+      <p id="runsEmpty" class="muted" hidden>No matching run time found in the next 4 years — this expression may be impossible (e.g. day 30 of a month that never has 30 days combined with a fixed month).</p>
+    </section>
+  </main>
+
+  <footer class="app-footer container">
+    Part of the <a href="https://github.com/kasapdev/web-utility-suite">Web Utility Suite</a> · MIT Licensed
+  </footer>
+
+  <!-- Shortcuts help modal -->
+  <div id="helpBackdrop" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="row between center" style="margin-bottom:var(--space-4)">
+        <h3 id="helpTitle" style="margin:0">Keyboard shortcuts</h3>
+        <button id="helpClose" class="btn btn--icon btn--ghost" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <table class="shortcut-table">
+        <tbody id="shortcutRows"></tbody>
+      </table>
+      <p class="muted" style="margin:var(--space-4) 0 0;font-size:13px">Tip: <kbd>mod</kbd> means <kbd>Ctrl</kbd> on Windows/Linux and <kbd>⌘</kbd> on macOS.</p>
+    </div>
+  </div>
+
+  <!-- Field card template -->
+  <template id="fieldCardTemplate">
+    <div class="field-card panel">
+      <div class="field-card-head">
+        <h3 class="field-card-title"></h3>
+        <span class="field-card-range muted mono"></span>
+      </div>
+      <div class="segmented field-mode" role="tablist">
+        <button type="button" data-mode="every" aria-selected="true" role="tab">Every</button>
+        <button type="button" data-mode="specific" aria-selected="false" role="tab">Specific</button>
+        <button type="button" data-mode="range" aria-selected="false" role="tab">Range</button>
+        <button type="button" data-mode="step" aria-selected="false" role="tab">Step</button>
+      </div>
+      <div class="field-mode-body">
+        <p class="mode-panel muted" data-mode-panel="every">Fires on every value.</p>
+        <div class="mode-panel" data-mode-panel="specific" hidden>
+          <input type="text" class="field-specific-input mono" placeholder="e.g. 0,15,30,45">
+        </div>
+        <div class="mode-panel row center gap-2" data-mode-panel="range" hidden>
+          <input type="number" class="field-range-from">
+          <span class="muted">through</span>
+          <input type="number" class="field-range-to">
+        </div>
+        <div class="mode-panel row center gap-2" data-mode-panel="step" hidden>
+          <span class="muted">every</span>
+          <input type="number" class="field-step-input" min="1" value="1">
+          <span class="muted field-step-unit"></span>
+        </div>
+      </div>
+      <p class="field-error" hidden></p>
+    </div>
+  </template>
+
+  <script src="assets/js/core.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
