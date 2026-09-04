@@ -1,22 +1,23 @@
 # Cron Expression Builder Pro
 
-Build cron expressions visually, read them back in plain English, and preview the next 5 run times — fast, private, and fully offline.
+Build, parse and validate cron expressions visually — with a live human-readable explanation and a next-5-run-times preview.
 
-> A premium, zero-dependency cron workbench. Pick minute/hour/day/month/weekday rules with segmented controls or type a raw expression directly — both stay in sync. Get a hand-written, human-readable explanation and a real next-run calculator, all in your browser, with nothing ever leaving your machine.
+> A premium, zero-dependency cron workbench. Pick each of the five fields with Every / Specific / Range / Step / List controls, or type a raw expression directly — both stay perfectly in sync. Every keystroke re-parses the schedule, explains it in plain English, and lists the next five times it will actually fire, all computed from scratch in the browser with nothing ever leaving your machine.
 
 ## Overview
 
-Cron Expression Builder Pro is part of the **Web Utility Suite**. It runs entirely in the browser with no build step, no frameworks, and no network calls — open `index.html` from disk and it works. Five field cards (minute, hour, day-of-month, month, day-of-week) each support four modes — Every, Specific, Range, Step — and stay fully synced with a raw 5-field cron expression input in both directions. An explanation panel translates the current expression into a plain-English sentence, and a next-run panel lists the next 5 times the schedule will actually fire, computed by a purpose-built cron simulator.
+Cron Expression Builder Pro is part of the **Web Utility Suite**. It runs entirely in the browser with no build step, no frameworks, and no network calls — open `index.html` from disk and it works. Five field-picker cards (Minute, Hour, Day-of-month, Month, Day-of-week) drive a raw 5-field expression input, and vice versa: edit or paste any valid cron string and the pickers instantly reflect it. A hand-written parser, explainer, and next-run calculator power the whole thing — no cron library involved.
 
 ## Features
 
-- **Visual field builder** — minute, hour, day-of-month, month, and day-of-week, each with Every / Specific / Range / Step / List (comma-separated) modes, kept in sync with each other and with the raw expression. Month and day-of-week names (January, Monday, …) are used when rendering the plain-English explanation.
-- **Two-way raw expression sync** — edit the pickers and the raw `* * * * *` string updates live; paste or type a raw expression and it parses back into the pickers, including `*/n`, `a-b`, `a-b/n`, and comma lists.
-- **10 built-in presets** — every minute, every 5/15 minutes, hourly, every 2 hours, daily at midnight, weekdays at 9am, weekly, monthly, and yearly.
-- **Plain-English explanation** — written from scratch in JavaScript (no library), correctly reflecting cron's day-of-month/day-of-week **OR** semantics when both are restricted.
-- **Next 5 run times** — a hand-written cron-to-next-run simulator (no library) walks forward from now, field by field, with a relative "in N days/hours/minutes" label next to each result (refreshed every 30s) and a safety cap (~4 simulated years) that reports "no matching run time found" for impossible schedules (e.g. day 30 of a fixed February).
-- **Inline validation** — each field flags out-of-range values, malformed ranges, and invalid steps without crashing the app; a status badge and error panel surface the problem.
-- **Copy** the raw expression to the clipboard.
+- **Five field pickers** (Minute, Hour, Day-of-month, Month, Day-of-week), each with an **Every / Specific / Range / Step / List** segmented sub-mode and the right input for the job (number spinner or named `<select>` for months/weekdays).
+- **Bidirectional sync** — changing a picker rewrites the raw expression; editing or pasting into the raw field re-parses it and updates every picker to match.
+- **Hand-written cron parser** supporting `*`, `*/n`, `a`, `a-b`, `a-b/n`, `a/n`, and comma-separated combinations of all of the above (e.g. `1-5,10,*/15`).
+- **Live human-readable explanation** generated from scratch in plain JS — e.g. *"At 09:00, on weekdays."* or *"At every 15 minutes past every hour, every day."*
+- **Next 5 run times**, computed by a hand-written day-by-day forward search that respects standard cron day-of-month/day-of-week **OR** semantics (when both fields are restricted, a date matches if it satisfies *either* one) and shows a friendly empty state for impossible schedules (e.g. day 30 of February).
+- **Presets dropdown** — every minute, every 5/15 minutes, hourly, every 2 hours, daily at midnight, weekdays at 9am, weekly on Monday, monthly on the 1st, yearly on Jan 1.
+- **Validation** — malformed or out-of-range expressions are clearly flagged in an error panel; the explanation and next-run list hide until the expression is valid again.
+- **Copy** the raw expression to the clipboard in one click.
 - **Auto-persist** — your last expression is saved to `localStorage` and restored on return.
 - **Dark & light themes**, fully responsive down to 360px, accessible, and keyboard-driven.
 
@@ -33,19 +34,21 @@ Then simply open `index.html` in any modern browser (double-click it, or `file:/
 
 ## Usage
 
-1. Set each field's mode (Every / Specific / Range / Step) using the segmented control on its card — or paste/type a raw cron expression directly into the top bar.
-2. Watch the **Explanation** panel update live with a plain-English description of the schedule.
-3. Check the **Next 5 run times** panel to see exactly when the schedule will next fire, in your local time.
-4. Fix any field flagged with a red error before relying on the result.
-5. **Copy** the raw expression once you're happy with it, or pick one of the 10 presets to start from a common schedule.
+1. Pick a **preset** from the dropdown, or build your own schedule using the five field cards — switch each field's mode between **Every**, **Specific**, **Range**, **Step**, and **List**.
+2. Watch the **raw expression** field update live, or type/paste a cron string directly into it — press **Apply** (or <kbd>Ctrl/⌘</kbd>+<kbd>Enter</kbd>) to commit it explicitly.
+3. Read the **Explanation** panel for a plain-English description of the schedule.
+4. Check the **Next 5 runs** panel to see exactly when the schedule will fire next, with a relative "in N minutes/hours/days" label.
+5. If the expression is invalid, the **error panel** explains why — fix the field count or an out-of-range value and the explanation/runs reappear automatically.
+6. **Copy** the raw expression whenever you need it elsewhere.
 
 ## Keyboard Shortcuts
 
 | Action                | Shortcut                       |
 | ---------------------- | ------------------------------ |
+| Apply raw expression   | <kbd>Ctrl/⌘</kbd> + <kbd>Enter</kbd> |
 | Copy expression        | <kbd>Ctrl/⌘</kbd> + <kbd>C</kbd> |
 | Show shortcuts help    | <kbd>?</kbd>                    |
-| Close dialog            | <kbd>Esc</kbd>                  |
+| Close dialog           | <kbd>Esc</kbd>                  |
 
 ## Screenshots
 
@@ -56,12 +59,12 @@ Then simply open `index.html` in any modern browser (double-click it, or `file:/
 
 ## Roadmap
 
-- [ ] Named schedule presets (`@daily`, `@hourly`, `@weekly`, …)
-- [ ] Support for non-standard 6-field crons with seconds
-- [ ] Time zone selector for the next-run calculation
-- [ ] Export/import a library of saved expressions
-- [ ] Visual calendar heatmap of upcoming run times
+- [ ] Timezone-aware next-run calculation (currently uses the browser's local time)
+- [ ] Named month/weekday tokens in the raw expression (`JAN`, `MON`, etc.)
+- [ ] Support for `@yearly` / `@daily` / `@hourly` shorthand nicknames
+- [ ] Export a schedule summary (crontab line + explanation) as a shareable snippet
+- [ ] Visual weekly calendar heatmap of upcoming runs
 
 ## License
 
-MIT Licensed. Part of the [Web Utility Suite](../index.html).
+MIT Licensed. Part of the [Web Utility Suite](https://github.com/kasapdev/web-utility-suite).

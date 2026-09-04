@@ -234,8 +234,8 @@
   var MAX_SEARCH_DAYS = 4 * 366; // ~4-year safety cap
 
   function computeNextRuns(parsed, fromDate, count) {
-    var minuteList = Array.prototype.slice.call(parsed.minute).sort(function (a, b) { return a - b; });
-    var hourList = Array.prototype.slice.call(parsed.hour).sort(function (a, b) { return a - b; });
+    var minuteList = Array.from(parsed.minute).sort(function (a, b) { return a - b; });
+    var hourList = Array.from(parsed.hour).sort(function (a, b) { return a - b; });
 
     var results = [];
     var startBoundary = new Date(fromDate.getTime());
