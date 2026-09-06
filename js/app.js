@@ -354,7 +354,11 @@
       s.mode = 'every';
     } else if (/^\d+$/.test(rawFieldStr)) {
       s.mode = 'specific';
-      s.specific = clampInt(parseInt(rawFieldStr, 10), def);
+      var specificVal = parseInt(rawFieldStr, 10);
+      // Day-of-week "7" is a valid cron alias for Sunday (0); normalize it
+      // before clamping so the picker doesn't misrepresent it as Saturday.
+      if (def.aliasSevenToZero && specificVal === 7) specificVal = 0;
+      s.specific = clampInt(specificVal, def);
     } else if ((m = /^(\d+)-(\d+)$/.exec(rawFieldStr))) {
       s.mode = 'range';
       s.rangeFrom = clampInt(parseInt(m[1], 10), def);
